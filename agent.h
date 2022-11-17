@@ -134,6 +134,7 @@ public:
             }
             action best_action = get_best_action(root);
             delete_tree(root);
+            free(root);
             return best_action;
         }
         else {
@@ -252,8 +253,10 @@ public:
 
     void delete_tree(Node* node){
 		if(!node->children.empty()){
-			for(size_t i = 0; i < node->children.size(); i++) 
+			for(size_t i = 0; i < node->children.size(); i++) {
                 delete_tree(node->children[i]);
+                free(node->children[i]);
+            }
 			node->children.clear();
 		}
 	}
