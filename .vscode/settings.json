@@ -69,6 +69,8 @@
         "xtree": "cpp",
         "xutility": "cpp",
         "functional": "cpp",
-        "queue": "cpp"
+        "queue": "cpp",
+        "stop_token": "cpp",
+        "thread": "cpp"
     }
 }

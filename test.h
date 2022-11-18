@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <fstream>
 #include <time.h>
+#include <thread>
 #include "board.h"
 #include "action.h"
 
@@ -124,11 +125,11 @@ public:
             Node* root = new Node;
             root->state = state;
             root->who = (who == board::white ? board::black : board::white);
-            Expansion(root);
+            Expansion(root, white_space, black_space);
             while(1) {
                 Node* selected_node = Selection(root);
-                Expansion(selected_node);
-                board::piece_type winner = Simulation(selected_node);
+                Expansion(selected_node, white_space, black_space);
+                board::piece_type winner = Simulation(selected_node, white_space, black_space, who);
                 bool win = (root->who != winner);
                 total_count++;
                 BackPropogation(root, selected_node, win, total_count);
@@ -141,6 +142,45 @@ public:
             free(root);
             return best_action;
         }
+        else if (search == "p-mcts") {
+            rave.clear();
+            for(auto it:space) rave[it] = std::make_pair(0,0);
+
+            int step = 73;
+            for(int i = 0; i < 9; i++){
+                for(int j = 0; j < 9; j++){
+                    if(state[i][j] == board::empty) step--;
+                }
+            }
+            roots.clear();
+            roots.resize(PNUM);
+            for (int i = 0; i < PNUM; i++) {
+                roots[i] = new Node;
+                roots[i]->state = state;
+                roots[i]->who = (who == board::white ? board::black : board::white);
+                Expansion(roots[i], white_space, black_space);
+			}
+            std::vector<std::thread> threads;
+            for (int i = 0; i < PNUM; i++) {
+                threads.push_back(std::thread(&player::func, this, step, roots[i]));
+            }
+            for (int i = 0; i < PNUM; i++) {
+                threads[i].join();
+            }
+            for (int i = 1; i < PNUM; i++) {
+                int bound = std::min(roots[0]->children.size(), roots[i]->children.size());
+				for(int j = 0; j < bound ;j++) {
+					roots[0]->children[j]->total += roots[i]->children[j]->total;
+				}
+			}
+            
+            action best_action = get_best_action(roots[0]);
+            for(int i = 0; i < PNUM; i++) {
+				delete_tree(roots[i]);
+				free(roots[i]);
+			}
+            return best_action;
+        }
         else {
             std::shuffle(space.begin(), space.end(), engine);
             for (const action::place& move : space) {
@@ -151,6 +191,26 @@ public:
         }
 		return action();
 	}
+
+    void func(int step, Node* root){
+        clock_t start_time = clock();
+        clock_t end_time;
+		int total_count = 0;
+        std::vector<action::place> white_space_cpy = white_space;
+        std::vector<action::place> black_space_cpy = black_space;
+        board::piece_type who_cpy = who;
+		while(1) {
+            Node* selected_node = Selection(root);
+            Expansion(selected_node, white_space_cpy, black_space_cpy);
+            board::piece_type winner = Simulation(selected_node, white_space_cpy, black_space_cpy, who_cpy);
+            bool win = (root->who != winner);
+            total_count++;
+            BackPropogation(root, selected_node, win, total_count);
+            end_time = clock();
+            double total_time = (double)(end_time - start_time)/CLOCKS_PER_SEC;
+            if (total_time >= time_management[step/2]) break;
+        }
+    }
 
     Node* Selection(Node* node){
 		while(!node->children.empty()){
@@ -167,7 +227,7 @@ public:
 		return node;
 	}
 
-    void Expansion(Node* parent_node){
+    void Expansion(Node* parent_node, std::vector<action::place> white_space, std::vector<action::place> black_space){
 		if (parent_node->who == board::black){
 			for (size_t i = 0; i < white_space.size(); i++){
 				board after = parent_node->state;
@@ -196,14 +256,14 @@ public:
 		}
 	}
 
-    board::piece_type Simulation(Node* node){
+    board::piece_type Simulation(Node* node, std::vector<action::place> white_space, std::vector<action::place> black_space, board::piece_type who){
 		bool flag = true;
 		board state = node->state;
-		board::piece_type who = node->who;
+		board::piece_type whose_turn = node->who;
 		while(flag){
 			flag = false;
-            who = (who == board::white ? board::black : board::white);
-			if (who == board::black){
+            whose_turn = (whose_turn == board::white ? board::black : board::white);
+			if (whose_turn == board::black){
 				std::shuffle(black_space.begin(), black_space.end(), engine);
 				for (const action::place& move : black_space) {
 					board after = state;
@@ -214,7 +274,7 @@ public:
 					}
 				}
 			}
-			else if (who == board::white){
+			else if (whose_turn == board::white){
 				std::shuffle(white_space.begin(), white_space.end(), engine);
 				for (const action::place& move : white_space) {
 					board after = state;
@@ -226,8 +286,8 @@ public:
 				}
 			}
 		}
-        who = (who == board::white ? board::black : board::white);
-		return who;
+        whose_turn = (whose_turn == board::white ? board::black : board::white);
+		return whose_turn;
 	}
 
     double get_UCB_value(Node* node, int total_count){
@@ -248,7 +308,7 @@ public:
 			if (win) node->win++;
             rave[node->move].first++;
 			if (win) rave[node->move].second++;
-			node->ucb = get_RAVE_value(node, total_count);
+			node->ucb = get_UCB_value(node, total_count);
 			node = node->parent;
 		}
 	}
@@ -281,11 +341,13 @@ private:
     std::vector<action::place> white_space;
     std::vector<action::place> black_space;
 	board::piece_type who;
-    double constant = 0.5;
+    double constant = 0.1;
     double time_management[36] = {0.5, 0.5, 0.5, 0.5, 0.8, 0.8, 0.8, 0.8, 
                                   1.0, 1.0, 1.0, 1.0, 1.5, 1.5, 1.5, 1.5, 
                                   2.0, 2.0, 2.0, 2.0, 1.5, 1.5, 1.5, 1.5, 
                                   1.0, 1.0, 1.0, 1.0, 0.8, 0.8, 0.8, 0.8, 
                                   0.5, 0.5, 0.5, 0.5};
     std::map<action::place, std::pair<int,int>> rave;
+    int PNUM = 8;
+    std::vector<Node*> roots;
 };
