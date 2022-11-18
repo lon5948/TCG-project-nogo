@@ -267,7 +267,7 @@ private:
     std::vector<action::place> white_space;
     std::vector<action::place> black_space;
 	board::piece_type who;
-    double constant = 0.1;
+    double constant = 0.5;
     double time_management[36] = {0.3, 0.3, 0.3, 0.3, 0.6, 0.6, 0.6, 0.6, 
                                   0.9, 0.9, 0.9, 0.9, 1.2, 1.2, 1.2,1.2, 
                                   1.5, 1.5, 1.5, 1.5, 1.2, 1.2, 1.2, 1.2, 
