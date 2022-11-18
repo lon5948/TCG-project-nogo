@@ -110,6 +110,10 @@ public:
         if (search == "mcts") {
             clock_t start_time = clock();
             clock_t end_time;
+
+            rave.clear();
+            for(auto it:space) rave[it] = std::make_pair(0,0);
+
             int total_count = 0;
             int step = 73;
             for(int i = 0; i < 9; i++){
@@ -127,7 +131,7 @@ public:
                 board::piece_type winner = Simulation(selected_node);
                 bool win = (root->who != winner);
                 total_count++;
-                BackPropogation(selected_node, win, total_count);
+                BackPropogation(root, selected_node, win, total_count);
                 end_time = clock();
                 double total_time = (double)(end_time - start_time)/CLOCKS_PER_SEC;
                 if (total_time >= time_management[step/2]) break;
@@ -226,15 +230,25 @@ public:
 		return who;
 	}
 
-    double get_UCB_value(Node* node, int total_visit_count){
-		return ((double)node->win/node->total) + constant * sqrt(log((double)total_visit_count)/node->total);
+    double get_UCB_value(Node* node, int total_count){
+		return ((double)node->win/node->total) + constant * sqrt(log((double)total_count)/node->total);
 	}
 
-    void BackPropogation(Node* node, bool win, int total_count){
-		while(node != nullptr){
+    double get_RAVE_value(Node* node, int total_count){
+        double b = 0.025;
+        double beta = (double)rave[node->move].first/((double)node->total + (double)rave[node->move].first + 4 * (double)node->total * (double)rave[node->move].first * pow(b, 2));
+        double UCB = ((double)node->win/node->total) + constant * sqrt(log((double)total_count)/node->total);
+        double RAVE = ((double)rave[node->move].second/rave[node->move].first) + constant * sqrt(log((double)total_count)/rave[node->move].first);
+		return (1 - beta) * UCB + beta * RAVE;
+	}
+
+    void BackPropogation(Node* root, Node* node, bool win, int total_count){
+		while(node != root){
 			node->total++;
 			if (win) node->win++;
-			node->ucb = get_UCB_value(node, total_count);
+            rave[node->move].first++;
+			if (win) rave[node->move].second++;
+			node->ucb = get_RAVE_value(node, total_count);
 			node = node->parent;
 		}
 	}
@@ -267,10 +281,11 @@ private:
     std::vector<action::place> white_space;
     std::vector<action::place> black_space;
 	board::piece_type who;
-    double constant = 0.5;
+    double constant = 0.1;
     double time_management[36] = {0.3, 0.3, 0.3, 0.3, 0.6, 0.6, 0.6, 0.6, 
                                   0.9, 0.9, 0.9, 0.9, 1.2, 1.2, 1.2,1.2, 
                                   1.5, 1.5, 1.5, 1.5, 1.2, 1.2, 1.2, 1.2, 
                                   0.9, 0.9, 0.9, 0.9, 0.6, 0.6, 0.6, 0.6, 
                                   0.3, 0.3, 0.3, 0.3};
+    std::map<action::place, std::pair<int,int>> rave;
 };
