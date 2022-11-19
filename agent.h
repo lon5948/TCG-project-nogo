@@ -134,7 +134,7 @@ public:
             
 			action best_action = get_best_action(root);
             delete_tree(root);
-            free(root);
+            delete(root);
             return best_action;
         }
         else {
@@ -255,7 +255,7 @@ public:
 		if(!node->children.empty()){
 			for(size_t i = 0; i < node->children.size(); i++) {
                 delete_tree(node->children[i]);
-                free(node->children[i]);
+                delete(node->children[i]);
             }
 			node->children.clear();
 		}
@@ -267,7 +267,7 @@ private:
     std::vector<action::place> white_space;
     std::vector<action::place> black_space;
 	board::piece_type who;
-    double constant = 0.8;
+    double constant = 0.4;
     double time_management[36] = {0.5, 0.5, 0.5, 0.5, 0.8, 0.8, 0.8, 0.8, 
                                   1.0, 1.0, 1.0, 1.0, 1.5, 1.5, 1.5, 1.5, 
                                   2.0, 2.0, 2.0, 2.0, 1.5, 1.5, 1.5, 1.5, 
