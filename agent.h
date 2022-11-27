@@ -14,9 +14,11 @@
 #include <iostream>
 #include <cmath>
 #include <map>
+#include <vector>
 #include <type_traits>
 #include <algorithm>
 #include <fstream>
+#include <thread> 
 #include <time.h>
 #include "board.h"
 #include "action.h"
@@ -105,50 +107,30 @@ public:
 
 	virtual action take_action(const board& state) {
         if (search == "mcts") {
-			/*
-			 * mcts player with time management 
-			 */
-            clock_t start_time = clock();
-            clock_t end_time;
-
-            int total_count = 0;
-			/* find out what step it is */
-            int step = 73;
-            for(int i = 0; i < 9; i++){
-                for(int j = 0; j < 9; j++){
-                    if(state[i][j] == board::empty) step--;
-                }
-            }
-			/* It's opponent's turn */
-            Node* root = new Node;
-            root->state = state;
-            root->who = (who == board::white ? board::black : board::white);
-            Expansion(root);
-
-			bool win;
-			board::piece_type winner;
-			Node* selected_node;
-			/* If total time exceeds the limit time in this step, stop doing MCTS. */
-            do {
-				total_count++; /* record visit count in total */
-                selected_node = Selection(root);
-                Expansion(selected_node);
-                winner = Simulation(selected_node);
-                win = (root->who != winner); 
-                BackPropogation(root, selected_node, win, total_count);
-                end_time = clock();
-            } while((double)(end_time - start_time)/CLOCKS_PER_SEC < time_management[step/2]);
-            /* according to nodes’ # of totals, return the best action. */
-			action best_action = get_best_action(root);
-            delete_tree(root);
-            delete(root);
+			// It's opponent's turn 
+			std::vector<std::thread> threads;
+			roots.resize(thread_num);
+			for (int i=0; i<thread_num; i++) {
+				Node* root = new Node;
+				roots[i] = root;
+				roots[i]->state = state;
+				roots[i]->who = (who == board::white ? board::black : board::white);
+				Expansion(roots[i]);
+				threads.push_back(std::thread(&player::MCTS, this, state, i));
+			}
+			for (int i = 0; i < thread_num; i++) {
+				threads[i].join();
+			}
+            // according to nodes’ # of totals, return the best action. 
+			action best_action = get_best_action(roots[0]);
+			for (int i = 0; i < thread_num; i++) {
+				delete_tree(roots[i]);
+            	delete(roots[i]);
+			}
             return best_action;
         }
         else {
-			/**
-			 * random player for both side
-			 * put a legal piece randomly
-			 */
+			// random player for both side put a legal piece randomly 
             std::shuffle(space.begin(), space.end(), engine);
             for (const action::place& move : space) {
                 board after = state;
@@ -157,6 +139,33 @@ public:
             }
         }
 		return action();
+	}
+
+	void MCTS(board state, int index) {
+		/* mcts player with time management */
+        clock_t start_time = clock();
+        clock_t end_time;
+		int total_count = 0;
+		/* find out what step it is */
+        int step = 73;
+        for(int i = 0; i < 9; i++){
+            for(int j = 0; j < 9; j++){
+                if(state[i][j] == board::empty) step--;
+            }
+        }
+		bool win;
+		board::piece_type winner;
+		Node* selected_node;
+		/* If total time exceeds the limit time in this step, stop doing MCTS. */
+        do {
+			total_count++; /* record visit count in total */
+            selected_node = Selection(roots[index]);
+            Expansion(selected_node);
+            winner = Simulation(selected_node);
+            win = (roots[index]->who != winner); 
+            BackPropogation(roots[index], selected_node, win, total_count);
+            end_time = clock();
+        } while((double)(end_time - start_time)/CLOCKS_PER_SEC < time_management[step/2]);	
 	}
 
     Node* Selection(Node* node){
@@ -290,4 +299,6 @@ private:
                                   2.0, 2.0, 2.0, 2.0, 1.5, 1.5, 1.5, 1.5, 
                                   1.0, 1.0, 1.0, 1.0, 0.8, 0.8, 0.8, 0.8, 
                                   0.5, 0.5, 0.5, 0.5};
+	std::vector<Node*> roots;
+	int thread_num = 1;
 };
