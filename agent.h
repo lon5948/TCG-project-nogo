@@ -18,7 +18,6 @@
 #include <type_traits>
 #include <algorithm>
 #include <fstream>
-#include <thread> 
 #include <time.h>
 #include "board.h"
 #include "action.h"
@@ -107,26 +106,41 @@ public:
 
 	virtual action take_action(const board& state) {
         if (search == "mcts") {
+			// mcts player with time management 
+			clock_t start_time = clock();
+			clock_t end_time;
+			int total_count = 0;
+			// find out what step it is 
+			int step = 73;
+			for(int i = 0; i < 9; i++){
+				for(int j = 0; j < 9; j++){
+					if(state[i][j] == board::empty) step--;
+				}
+			}
 			// It's opponent's turn 
-			std::vector<std::thread> threads;
-			roots.resize(thread_num);
-			for (int i=0; i<thread_num; i++) {
-				Node* root = new Node;
-				roots[i] = root;
-				roots[i]->state = state;
-				roots[i]->who = (who == board::white ? board::black : board::white);
-				Expansion(roots[i]);
-				threads.push_back(std::thread(&player::MCTS, this, state, i));
-			}
-			for (int i = 0; i < thread_num; i++) {
-				threads[i].join();
-			}
+			Node* root = new Node;
+			root->state = state;
+			root->who = (who == board::white ? board::black : board::white);
+			Expansion(root);
+
+			bool win;
+			board::piece_type winner;
+			Node* selected_node;
+			// If total time exceeds the limit time in this step, stop doing MCTS. 
+			do {
+				total_count++; // record visit count in total 
+				selected_node = Selection(root);
+				Expansion(selected_node);
+				winner = Simulation(selected_node);
+				win = (root->who != winner); 
+				BackPropogation(root, selected_node, win, total_count);
+				end_time = clock();
+			} while((double)(end_time - start_time)/CLOCKS_PER_SEC < time_management[step/2]);	
+
             // according to nodes’ # of totals, return the best action. 
-			action best_action = get_best_action(roots[0]);
-			for (int i = 0; i < thread_num; i++) {
-				delete_tree(roots[i]);
-            	delete(roots[i]);
-			}
+			action best_action = get_best_action(root);
+			delete_tree(root);
+            delete(root);
             return best_action;
         }
         else {
@@ -141,39 +155,12 @@ public:
 		return action();
 	}
 
-	void MCTS(board state, int index) {
-		/* mcts player with time management */
-        clock_t start_time = clock();
-        clock_t end_time;
-		int total_count = 0;
-		/* find out what step it is */
-        int step = 73;
-        for(int i = 0; i < 9; i++){
-            for(int j = 0; j < 9; j++){
-                if(state[i][j] == board::empty) step--;
-            }
-        }
-		bool win;
-		board::piece_type winner;
-		Node* selected_node;
-		/* If total time exceeds the limit time in this step, stop doing MCTS. */
-        do {
-			total_count++; /* record visit count in total */
-            selected_node = Selection(roots[index]);
-            Expansion(selected_node);
-            winner = Simulation(selected_node);
-            win = (roots[index]->who != winner); 
-            BackPropogation(roots[index], selected_node, win, total_count);
-            end_time = clock();
-        } while((double)(end_time - start_time)/CLOCKS_PER_SEC < time_management[step/2]);	
-	}
-
     Node* Selection(Node* node){
-		/* return leaf node */
+		// return leaf node 
 		while(!node->children.empty()){
 			double max_ucb = -1;
 			int max_ucb_ind= 0; 
-			/* select the child which has max ucb score */
+			// select the child which has max ucb score 
 			for(size_t i=0; i < node->children.size(); i++){
 				if (node->children[i]->ucb > max_ucb){
 					max_ucb = node->children[i]->ucb;
@@ -187,7 +174,7 @@ public:
 
     void Expansion(Node* parent_node){
 		if (parent_node->who == board::black){
-			/* expand all the valid moves in white space */
+			// expand all the valid moves in white space 
 			for (size_t i = 0; i < white_space.size(); i++){
 				board after = parent_node->state;
 				if (white_space[i].apply(after) == board::legal){
@@ -201,7 +188,7 @@ public:
 			}
 		}
 		else if(parent_node->who == board::white){
-			/* expand all the valid moves in black space */
+			// expand all the valid moves in black space 
 			for (size_t i = 0; i < black_space.size(); i++){
 				board after = parent_node->state;
 				if (black_space[i].apply(after) == board::legal){
@@ -219,12 +206,12 @@ public:
     board::piece_type Simulation(Node* node){
 		bool flag = true;
 		board state = node->state;
-		board::piece_type who = node->who;
+		board::piece_type nodewho = node->who;
 		while(flag){
 			flag = false;
-            who = (who == board::white ? board::black : board::white); /* whose turn */
-			if (who == board::black){
-				/* black randomly gets one of valid moves */
+            nodewho = (nodewho == board::white ? board::black : board::white); /* whose turn */
+			if (nodewho == board::black){
+				// black randomly gets one of valid moves 
 				std::shuffle(black_space.begin(), black_space.end(), engine);
 				for (size_t i = 0; i < black_space.size(); i++) {
 					board after = state;
@@ -235,8 +222,8 @@ public:
 					}
 				}
 			}
-			else if (who == board::white){
-				/* white randomly gets one of valid moves */
+			else if (nodewho == board::white){
+				// white randomly gets one of valid moves 
 				std::shuffle(white_space.begin(), white_space.end(), engine);
 				for (size_t i = 0; i < white_space.size(); i++) {
 					board after = state;
@@ -248,17 +235,17 @@ public:
 				}
 			}
 		}
-		/* no legal action, so the rival wins */
-        who = (who == board::white ? board::black : board::white);
-		return who; /* return the winner*/
+		// no legal action, so the rival wins 
+        nodewho = (nodewho == board::white ? board::black : board::white);
+		return nodewho; // return the winner
 	}
 
-    void BackPropogation(Node* root, Node* node, bool win, int total_count){
+    void BackPropogation(Node* root, Node* node, bool win, int total_count) {
 		while(node != root){
-			/* update the node’s # of wins and # of totals */
+			// update the node’s # of wins and # of totals 
 			node->total++;
 			if (win) node->win++;
-			/* update the node's ucb */
+			// update the node's ucb 
 			node->ucb = ((double)node->win/(double)node->total) + constant * sqrt(log((double)total_count)/(double)node->total);
 			node = node->parent;
 		}
@@ -267,7 +254,7 @@ public:
     action get_best_action(Node* node){
 		action best_action = action();
 		int max_count = -1;
-		/* select the best action based on the visit count of child nodes. */
+		// select the best action based on the visit count of child nodes. 
 		for(size_t i = 0; i < node->children.size(); i++){
 			if (node->children[i]->total > max_count){
 				max_count = node->children[i]->total;
@@ -299,6 +286,4 @@ private:
                                   2.0, 2.0, 2.0, 2.0, 1.5, 1.5, 1.5, 1.5, 
                                   1.0, 1.0, 1.0, 1.0, 0.8, 0.8, 0.8, 0.8, 
                                   0.5, 0.5, 0.5, 0.5};
-	std::vector<Node*> roots;
-	int thread_num = 1;
 };
