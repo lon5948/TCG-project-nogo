@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <fstream>
 #include <time.h>
+#include <omp.h>
 #include "board.h"
 #include "action.h"
 
@@ -133,7 +134,7 @@ public:
 				Expansion(selected_node);
 				winner = Simulation(selected_node);
 				win = (root->who != winner); 
-				BackPropogation(root, selected_node, win, total_count);
+				BackPropagation(root, selected_node, win, total_count);
 				end_time = clock();
 			} while((double)(end_time - start_time)/CLOCKS_PER_SEC < time_management[step/2]);	
 
@@ -143,6 +144,55 @@ public:
             delete(root);
             return best_action;
         }
+		else if (search == "p-mcts") {
+			omp_set_num_threads(thread_num);
+			std::vector<Node*> roots(thread_num);
+			int step = 73;
+			for(int i = 0; i < 9; i++){
+				for(int j = 0; j < 9; j++){
+					if(state[i][j] == board::empty) step--;
+				}
+			}
+			#pragma omp parallel for
+			for(int i = 0; i < thread_num; i++) {
+				clock_t start_time = clock();
+				clock_t end_time;
+				int total_count = 0;
+				roots[i] = new Node;
+				roots[i]->state = state;
+				roots[i]->who = (who == board::white ? board::black : board::white);
+				Expansion(roots[i]);
+				bool win;
+				board::piece_type winner;
+				Node* selected_node;
+				do {
+					total_count++; 
+					selected_node = Selection(roots[i]);
+					Expansion(selected_node);
+					winner = Simulation(selected_node);
+					win = (roots[i]->who != winner); 
+					BackPropagation(roots[i], selected_node, win, total_count);
+					end_time = clock();
+				} while((double)(end_time - start_time)/CLOCKS_PER_SEC < time_management[step/2]);	
+			}
+
+			for (int idx = 1; idx < thread_num; idx++) {
+				//std::cout << idx << " " << roots[idx]->children.size() << std::endl;
+				//if (roots[idx]->children.size() != bound) throw std::invalid_argument("children size error");
+				for(int i = 0; i < roots[0]->children.size() ; i++) {
+					roots[0]->children[i]->total += roots[idx]->children[i]->total;
+				}
+			}
+			//std::cout << "+++++++++++++++++++++++" << std::endl;
+			action best_action;
+			best_action = get_best_action(roots[0]);
+			#pragma omp parallel for
+			for(int i = 0; i < thread_num; i++) {
+				delete_tree(roots[i]);
+				delete(roots[i]);
+			}
+			return best_action;
+		}
         else {
 			// random player for both side put a legal piece randomly 
             std::shuffle(space.begin(), space.end(), engine);
@@ -240,7 +290,7 @@ public:
 		return nodewho; // return the winner
 	}
 
-    void BackPropogation(Node* root, Node* node, bool win, int total_count) {
+    void BackPropagation(Node* root, Node* node, bool win, int total_count) {
 		while(node != root){
 			// update the node’s # of wins and # of totals 
 			node->total++;
@@ -281,9 +331,19 @@ private:
     std::vector<action::place> black_space;
 	board::piece_type who;
     double constant = 0.5;
+	int thread_num = 4;
+	
     double time_management[36] = {0.5, 0.5, 0.5, 0.5, 0.8, 0.8, 0.8, 0.8, 
                                   1.0, 1.0, 1.0, 1.0, 1.5, 1.5, 1.5, 1.5, 
                                   2.0, 2.0, 2.0, 2.0, 1.5, 1.5, 1.5, 1.5, 
                                   1.0, 1.0, 1.0, 1.0, 0.8, 0.8, 0.8, 0.8, 
                                   0.5, 0.5, 0.5, 0.5};
+	/*
+	double time_management[36] = {3.0, 3.0, 3.0, 3.0, 3.0, 3.0,
+                                  3.0, 3.0, 3.0, 5.0, 5.0, 5.0,
+								  10.0, 10.0, 10.0, 10.0, 10.0, 10.0,
+								  15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 
+								  10.0, 10.0, 10.0, 10.0, 10.0, 10.0,
+								  10.0, 10.0, 10.0, 5.0, 4.0, 4.0};
+								  */
 };
