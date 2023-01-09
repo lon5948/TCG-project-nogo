@@ -76,7 +76,6 @@ class Node {
 	public:
         int total = 0; 
 		int win = 0;
-		double ucb = 10e9;
 		Node* parent = nullptr;
 		action::place move;
 		std::vector<Node*> children;
@@ -110,7 +109,6 @@ public:
 			// mcts player with time management 
 			clock_t start_time = clock();
 			clock_t end_time;
-			int total_count = 0;
 			// find out what step it is 
 			int step = 73;
 			for(int i = 0; i < 9; i++){
@@ -129,70 +127,22 @@ public:
 			Node* selected_node;
 			// If total time exceeds the limit time in this step, stop doing MCTS. 
 			do {
-				total_count++; // record visit count in total 
+				root->total += 1;
 				selected_node = Selection(root);
 				Expansion(selected_node);
 				winner = Simulation(selected_node);
 				win = (root->who != winner); 
-				BackPropagation(root, selected_node, win, total_count);
+				BackPropagation(root, selected_node, win);
 				end_time = clock();
 			} while((double)(end_time - start_time)/CLOCKS_PER_SEC < time_management[step/2]);	
 
             // according to nodes’ # of totals, return the best action. 
 			action best_action = get_best_action(root);
+			// std::cout << best_action << std::endl;
 			delete_tree(root);
             delete(root);
             return best_action;
         }
-		else if (search == "p-mcts") {
-			omp_set_num_threads(thread_num);
-			std::vector<Node*> roots(thread_num);
-			int step = 73;
-			for(int i = 0; i < 9; i++){
-				for(int j = 0; j < 9; j++){
-					if(state[i][j] == board::empty) step--;
-				}
-			}
-			#pragma omp parallel for
-			for(int i = 0; i < thread_num; i++) {
-				clock_t start_time = clock();
-				clock_t end_time;
-				int total_count = 0;
-				roots[i] = new Node;
-				roots[i]->state = state;
-				roots[i]->who = (who == board::white ? board::black : board::white);
-				Expansion(roots[i]);
-				bool win;
-				board::piece_type winner;
-				Node* selected_node;
-				do {
-					total_count++; 
-					selected_node = Selection(roots[i]);
-					Expansion(selected_node);
-					winner = Simulation(selected_node);
-					win = (roots[i]->who != winner); 
-					BackPropagation(roots[i], selected_node, win, total_count);
-					end_time = clock();
-				} while((double)(end_time - start_time)/CLOCKS_PER_SEC < time_management[step/2]);	
-			}
-
-			for (int idx = 1; idx < thread_num; idx++) {
-				//std::cout << idx << " " << roots[idx]->children.size() << std::endl;
-				//if (roots[idx]->children.size() != bound) throw std::invalid_argument("children size error");
-				for(int i = 0; i < roots[0]->children.size() ; i++) {
-					roots[0]->children[i]->total += roots[idx]->children[i]->total;
-				}
-			}
-			//std::cout << "+++++++++++++++++++++++" << std::endl;
-			action best_action;
-			best_action = get_best_action(roots[0]);
-			#pragma omp parallel for
-			for(int i = 0; i < thread_num; i++) {
-				delete_tree(roots[i]);
-				delete(roots[i]);
-			}
-			return best_action;
-		}
         else {
 			// random player for both side put a legal piece randomly 
             std::shuffle(space.begin(), space.end(), engine);
@@ -209,11 +159,12 @@ public:
 		// return leaf node 
 		while(!node->children.empty()){
 			double max_ucb = -1;
-			int max_ucb_ind= 0; 
+			int max_ucb_ind = 0; 
 			// select the child which has max ucb score 
-			for(size_t i=0; i < node->children.size(); i++){
-				if (node->children[i]->ucb > max_ucb){
-					max_ucb = node->children[i]->ucb;
+			for(size_t i = 0; i < node->children.size(); i++){
+				double ucb = get_ucb_value(node->children[i]);
+				if (ucb > max_ucb){
+					max_ucb = ucb;
 					max_ucb_ind = i;
 				}
 			}
@@ -223,7 +174,7 @@ public:
 	}
 
     void Expansion(Node* parent_node){
-		if (parent_node->who == board::black){
+		if (parent_node->who == board::black) {
 			// expand all the valid moves in white space 
 			for (size_t i = 0; i < white_space.size(); i++){
 				board after = parent_node->state;
@@ -237,7 +188,7 @@ public:
 				}
 			}
 		}
-		else if(parent_node->who == board::white){
+		else if(parent_node->who == board::white) {
 			// expand all the valid moves in black space 
 			for (size_t i = 0; i < black_space.size(); i++){
 				board after = parent_node->state;
@@ -259,13 +210,13 @@ public:
 		board::piece_type nodewho = node->who;
 		while(flag){
 			flag = false;
-            nodewho = (nodewho == board::white ? board::black : board::white); /* whose turn */
+            nodewho = (node->who == board::white ? board::black : board::white); /* whose turn */
 			if (nodewho == board::black){
 				// black randomly gets one of valid moves 
 				std::shuffle(black_space.begin(), black_space.end(), engine);
 				for (size_t i = 0; i < black_space.size(); i++) {
 					board after = state;
-					if (black_space[i].apply(after) == board::legal){
+					if (black_space[i].apply(after) == board::legal) {
 						black_space[i].apply(state);
 						flag = true;
 						break;
@@ -290,17 +241,20 @@ public:
 		return nodewho; // return the winner
 	}
 
-    void BackPropagation(Node* root, Node* node, bool win, int total_count) {
+    void BackPropagation(Node* root, Node* node, bool win) {
 		while(node != root){
 			// update the node’s # of wins and # of totals 
 			node->total++;
-			if (win) node->win++;
-			// update the node's ucb 
-			node->ucb = ((double)node->win/(double)node->total) + constant * sqrt(log((double)total_count)/(double)node->total);
+			if(win) node->win++;
 			node = node->parent;
 		}
 	}
 
+	double get_ucb_value(Node* node) {
+		double exploit = float(node->win) / node->total;
+		double explore = std::sqrt(log((double)node->parent->total)/(double)node->total);
+		return exploit + constant * explore;
+	}
     action get_best_action(Node* node){
 		action best_action = action();
 		int max_count = -1;
@@ -330,20 +284,19 @@ private:
     std::vector<action::place> white_space;
     std::vector<action::place> black_space;
 	board::piece_type who;
-    double constant = 0.5;
-	int thread_num = 4;
-	
+    double constant = std::sqrt(2);
+	/*
     double time_management[36] = {0.5, 0.5, 0.5, 0.5, 0.8, 0.8, 0.8, 0.8, 
                                   1.0, 1.0, 1.0, 1.0, 1.5, 1.5, 1.5, 1.5, 
                                   2.0, 2.0, 2.0, 2.0, 1.5, 1.5, 1.5, 1.5, 
                                   1.0, 1.0, 1.0, 1.0, 0.8, 0.8, 0.8, 0.8, 
                                   0.5, 0.5, 0.5, 0.5};
-	/*
-	double time_management[36] = {3.0, 3.0, 3.0, 3.0, 3.0, 3.0,
-                                  3.0, 3.0, 3.0, 5.0, 5.0, 5.0,
+	*/
+	double time_management[36] = {5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 
+                                  5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 
 								  10.0, 10.0, 10.0, 10.0, 10.0, 10.0,
-								  15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 
+								  12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 
 								  10.0, 10.0, 10.0, 10.0, 10.0, 10.0,
-								  10.0, 10.0, 10.0, 5.0, 4.0, 4.0};
-								  */
+								  10.0, 10.0, 10.0, 5.0, 5.0, 1.0};
+								  
 };
