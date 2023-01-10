@@ -71,7 +71,6 @@ class node{
 		board::piece_type who;
 		int win = 0;
 		int visit = 0;
-		//double UCB_RAVE_value = 0x7fffffff;
 		action::place move;
 		node* parent = nullptr;
 		std::vector<node*> children;
