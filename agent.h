@@ -159,6 +159,7 @@ public:
 		double constant = std::sqrt(2);
 		double beta = std::sqrt((double) simulation_count/(double)(3 * count + simulation_count));
 		double win_rate = (double) cur->win / (double) cur->visit;
+		if (cur->who == who) win_rate = 1 - win_rate;
 		double rave_win_rate = (double) rave_map[cur->move].second / (double) rave_map[cur->move].first;
 		double exploitation = (1 - beta) * win_rate + beta * rave_win_rate;
 		double exploration = sqrt(log((double)cur->parent->visit)/cur->visit);
@@ -203,34 +204,57 @@ public:
 	board::piece_type Simulation(node* root) {
 		bool terminal = false;
 		board state = root->state;
-		board::piece_type nodewho = root->who;
-		while(!terminal) {
+		board::piece_type who = root->who;
+        std::vector<board::point> emptyPoint;
+        for (int i = 0; i < board::size_x * board::size_y; i++) {
+            board::point move(i);
+            if (state[move.x][move.y] == board::empty)
+                emptyPoint.push_back(move);
+        }
+        int size = emptyPoint.size();
+		while(terminal == false) {
 			terminal = true;
-			nodewho = (nodewho == board::white ? board::black : board::white);
-			if (nodewho == board::black) {
-				std::shuffle(black_space.begin(), black_space.end(), engine);
-				for (size_t i = 0; i < black_space.size(); i++) {
-					board after = state;
-					if (black_space[i].apply(after) == board::legal) {
-						black_space[i].apply(state);
+			who = (who == board::white ? board::black : board::white);
+			if (who == board::black) {
+				int i = 0;
+				board after = state;
+				while(i < size){
+					std::uniform_int_distribution<int> uniform(i, size-1);
+					int randomIndex = uniform(engine);
+					if(after.place(emptyPoint[randomIndex]) == board::legal){
+						state.place(emptyPoint[randomIndex]);
+						std::swap(emptyPoint[randomIndex], emptyPoint[size-1]);
+						size--;
 						terminal = false;
-						break;
+						break;		
 					}
+					else{
+						std::swap(emptyPoint[randomIndex], emptyPoint[i]);
+                		i++;
+					}					
 				}
 			}
-			else if (nodewho == board::white){
-				std::shuffle(white_space.begin(), white_space.end(), engine);
-				for (size_t i = 0; i < white_space.size(); i++) {
-					board after = state;
-					if (white_space[i].apply(after) == board::legal){
-						white_space[i].apply(state);
+			else if (who == board::white) {
+				int i = 0;
+				board after = state;
+				while(i < size){
+					std::uniform_int_distribution<int> uniform(i, size-1);
+					int randomIndex = uniform(engine);
+					if(after.place(emptyPoint[randomIndex]) == board::legal){
+						state.place(emptyPoint[randomIndex]);
+						std::swap(emptyPoint[randomIndex], emptyPoint[size-1]);
+						size--;
 						terminal = false;
-						break;
+						break;		
 					}
+					else{
+						std::swap(emptyPoint[randomIndex], emptyPoint[i]);
+                		i++;
+					}					
 				}
 			}
 		}
-		return (nodewho == board::white ? board::black : board::white);
+		return (who == board::white ? board::black : board::white);
 	}
 	
 	void BackPropagation(node* root, node* cur, board::piece_type winner) {
